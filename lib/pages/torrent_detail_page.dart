@@ -460,6 +460,23 @@ class _TorrentDetailPageState extends State<TorrentDetailPage> {
   bool _webViewLoading = false;
   String? _webViewError;
 
+  // WebView 是否还有历史记录可后退，决定系统返回/边缘右滑是先退 WebView 还是退出页面
+  bool _canWebViewGoBack = false;
+
+  Future<void> _syncWebViewCanGoBack(InAppWebViewController controller) async {
+    bool canGoBack = false;
+    try {
+      canGoBack = await controller.canGoBack();
+    } catch (_) {
+      return;
+    }
+    if (!mounted || !identical(_webViewController, controller)) return;
+    if (_canWebViewGoBack == canGoBack) return;
+    setState(() {
+      _canWebViewGoBack = canGoBack;
+    });
+  }
+
   // 优雅关闭 WebView，避免页面退出或跳转时出现崩溃
   Future<void> _disposeWebView() async {
     final controller = _webViewController;
@@ -473,6 +490,7 @@ class _TorrentDetailPageState extends State<TorrentDetailPage> {
       );
     } catch (_) {}
     _webViewController = null;
+    _canWebViewGoBack = false;
   }
 
   @override
@@ -1995,6 +2013,10 @@ class _TorrentDetailPageState extends State<TorrentDetailPage> {
                   setState(() {
                     _webViewLoading = false;
                   });
+                  _syncWebViewCanGoBack(controller);
+                },
+                onUpdateVisitedHistory: (controller, url, isReload) {
+                  _syncWebViewCanGoBack(controller);
                 },
                 onProgressChanged: (controller, progress) {
                   // 可以在这里显示加载进度
@@ -2167,20 +2189,18 @@ class _TorrentDetailPageState extends State<TorrentDetailPage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: false,
+      canPop: !_canWebViewGoBack,
       onPopInvokedWithResult: (bool didPop, dynamic result) async {
         if (didPop) return;
 
-        if (_webViewController != null) {
+        if (_canWebViewGoBack && _webViewController != null) {
           try {
-            final canGoBack = await _webViewController!.canGoBack();
-            if (canGoBack) {
-              await _webViewController!.goBack();
-              return;
-            }
+            await _webViewController!.goBack();
+            return;
           } catch (_) {}
-          await _disposeWebView();
         }
+
+        await _disposeWebView();
 
         if (context.mounted) {
           Navigator.of(context).pop();

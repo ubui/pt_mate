@@ -26,6 +26,9 @@ class ResponsiveLayout extends StatelessWidget {
       builder: (context, constraints) {
         // 判断是否为大屏设备（宽度大于 768px）
         final isLargeScreen = ScreenUtils.isLargeScreen(context);
+        // 子页面让出左边缘手势给系统返回，并由 AppBar 自动显示返回按钮
+        final route = ModalRoute.of(context);
+        final isPushed = route != null && !route.isFirst;
 
         if (isLargeScreen) {
           // 大屏设备：使用固定侧边栏布局
@@ -55,13 +58,16 @@ class ResponsiveLayout extends StatelessWidget {
           );
         } else {
           // 小屏设备：使用传统的 Drawer 布局
+          // 子页面不挂抽屉，避免左边缘手势被抽屉抢占，同时让 AppBar 自动切换为返回按钮
           return Scaffold(
             appBar: appBar,
-            drawer: AppDrawer(
-              currentRoute: currentRoute,
-              onSettingsChanged: onSettingsChanged,
-              isFixedSidebar: false,
-            ),
+            drawer: isPushed
+                ? null
+                : AppDrawer(
+                    currentRoute: currentRoute,
+                    onSettingsChanged: onSettingsChanged,
+                    isFixedSidebar: false,
+                  ),
             floatingActionButton: floatingActionButton,
             floatingActionButtonLocation: floatingActionButtonLocation,
             body: SafeArea(top: true, bottom: true, child: body),
