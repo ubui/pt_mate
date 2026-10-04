@@ -457,7 +457,7 @@ func dartParseDateTime(_ string: String) throws -> Date {
     }
     var calendar = Calendar(identifier: .gregorian)
     #if canImport(Darwin)
-    calendar.isLenient = true
+    (calendar as NSCalendar).isLenient = true
     #endif
     calendar.timeZone = isUTC ? TimeZone(secondsFromGMT: 0)! : .current
     var components = DateComponents()
@@ -644,13 +644,13 @@ private func dartDateFormatParse(_ pattern: String, _ input: String) throws -> S
     for (token, literal) in tokens {
         if let literal {
             guard position < input.endIndex,
-                String(input[position]) == literal
+                input[position...].hasPrefix(literal)
             else {
                 throw ModelsError.formatException(
                     "Failed to parse date \"\(input)\" using format \"\(pattern)\" at literal \"\(literal)\""
                 )
             }
-            position = input.index(after: position)
+            position = input.index(position, offsetBy: literal.count)
             continue
         }
         switch token {
