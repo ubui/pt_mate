@@ -456,9 +456,6 @@ func dartParseDateTime(_ string: String) throws -> Date {
         }
     }
     var calendar = Calendar(identifier: .gregorian)
-    #if canImport(Darwin)
-    (calendar as NSCalendar).isLenient = true
-    #endif
     calendar.timeZone = isUTC ? TimeZone(secondsFromGMT: 0)! : .current
     var components = DateComponents()
     components.year = year
