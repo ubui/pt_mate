@@ -6,10 +6,12 @@ on:
     paths:
       - "ios_native/**"
       - ".github/workflows/ios-build.yml"
+      - ".github/scripts/annotate_xcodebuild.py"
   pull_request:
     paths:
       - "ios_native/**"
       - ".github/workflows/ios-build.yml"
+      - ".github/scripts/annotate_xcodebuild.py"
   workflow_dispatch:
 
 concurrency:
@@ -26,7 +28,7 @@ jobs:
 
       - name: Show environment
         run: |
-          xcodebuild -version
+          echo "::notice::$(xcodebuild -version | tr '\n' ' ')"
           xcrun simctl list devices available | head -25
 
       - name: Build for iOS Simulator
@@ -37,7 +39,22 @@ jobs:
             -scheme PTMate \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath DerivedData \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log \
+            | python3 .github/scripts/annotate_xcodebuild.py
+
+      - name: Annotate non-Swift failures
+        if: failure()
+        run: |
+          if [ -f build.log ]; then
+            grep -E "xcodebuild: error|requires a development team|does not exist|not currently configured|cannot be opened" build.log \
+              | head -30 | sed 's/^/::error::/' || true
+            if ! grep -q "error:" build.log; then
+              echo "::error::Build failed without an 'error:' line; last 40 lines:"
+              tail -40 build.log | sed 's/^/::error::/'
+            fi
+          else
+            echo "::error::build.log was not produced"
+          fi
 
       - name: Run unit tests
         run: |
@@ -47,4 +64,5 @@ jobs:
             -scheme PTMate \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             -derivedDataPath DerivedData \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee test.log \
+            | python3 .github/scripts/annotate_xcodebuild.py
