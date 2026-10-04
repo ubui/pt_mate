@@ -1,0 +1,50 @@
+name: iOS Build
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "ios_native/**"
+      - ".github/workflows/ios-build.yml"
+  pull_request:
+    paths:
+      - "ios_native/**"
+      - ".github/workflows/ios-build.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show environment
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | head -25
+
+      - name: Build for iOS Simulator
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project ios_native/PTMate.xcodeproj \
+            -scheme PTMate \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project ios_native/PTMate.xcodeproj \
+            -scheme PTMate \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO
