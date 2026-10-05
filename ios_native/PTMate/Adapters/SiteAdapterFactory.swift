@@ -8,9 +8,7 @@ enum SiteAdapterFactory {
         case .nexusphp:
             return NexusPHPAdapter()
         case .nexusphpweb:
-            throw ModelsError.argumentException(
-                "NexusPHPWeb 适配器在 iOS 端尚未实现，站点 \(config.name)（\(config.siteType.id)）暂不支持"
-            )
+            return NexusPHPWebAdapter()
         case .web:
             return WebAdapter()
         case .rousi:

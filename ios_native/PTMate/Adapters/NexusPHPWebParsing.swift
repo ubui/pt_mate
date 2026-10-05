@@ -34,6 +34,17 @@ enum NexusPHPWebErrorText {
     }
 }
 
+enum NexusPHPWebLog {
+    static func write(_ line: String) {
+        #if DEBUG
+        print(line)
+        #endif
+        Task {
+            await LogFileService.shared.append(line)
+        }
+    }
+}
+
 enum NexusPHPWebCore {
     private static let placeholderRegex = try! NSRegularExpression(
         pattern: #"\{([A-Za-z0-9_]+)\}"#
@@ -257,7 +268,13 @@ enum NexusPHPWebParser {
                 totalPages = pageValues.max() ?? totalPages
             }
         } catch {
-            logs?.append("解析总页数失败: \(NexusPHPWebErrorText.text(error))")
+            let message = "解析总页数失败: \(NexusPHPWebErrorText.text(error))"
+            if var collected = logs {
+                collected.append(message)
+                logs = collected
+            } else {
+                NexusPHPWebLog.write(message)
+            }
         }
         return totalPages
     }

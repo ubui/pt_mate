@@ -22,6 +22,22 @@ final class NexusPHPWebAdapter: SiteAdapter, NexusPHPHelper {
         _siteConfig
     }
 
+    private static let maxHtmlDumpLength = 200 * 1024
+
+    private func logRuleAndSoup(_ tag: String, _ rule: [String: Any]?, _ soup: Node?) {
+        let ruleJson = rule.map { jsonEncodeString($0) } ?? "{}"
+        var html = ""
+        if let soup {
+            html = (try? soup.outerHtml()) ?? ""
+        }
+        if html.utf16.count > Self.maxHtmlDumpLength {
+            html = String(decoding: Array(html.utf16.prefix(Self.maxHtmlDumpLength)), as: UTF16.self)
+                + "\n... (truncated)"
+        }
+        NexusPHPWebLog.write("[\(tag)] rule=\(ruleJson)")
+        NexusPHPWebLog.write("HTML=\(html)")
+    }
+
     func initialize(_ config: SiteConfig) async throws {
         _siteConfig = config
         await loadDiscountMapping()
@@ -253,6 +269,7 @@ final class NexusPHPWebAdapter: SiteAdapter, NexusPHPHelper {
         }
 
         guard let targetElement = extractor.findFirst(soup, rowSelector) else {
+            logRuleAndSoup("userInfo.rows.notFound", rowsConfig, soup)
             throw SiteServiceException(message: "未找到目标元素：\(rowSelector)")
         }
 
@@ -289,11 +306,13 @@ final class NexusPHPWebAdapter: SiteAdapter, NexusPHPHelper {
             }
 
             guard let targetElement = extractor.findFirst(soup, rowSelector) else {
+                logRuleAndSoup("bonus.rows.notFound", rowsConfig, soup)
                 throw SiteServiceException(message: "未找到目标元素：\(rowSelector)")
             }
 
             let parsedFields = HtmlExtractor.parseFieldConfigs(fieldsConfig)
             guard let field = parsedFields["bonusPerHour"] else {
+                logRuleAndSoup("bonus.field.missing", fieldsConfig, soup)
                 throw SiteServiceException(message: "配置错误：缺少 bonusPerHour 字段")
             }
 
@@ -303,6 +322,7 @@ final class NexusPHPWebAdapter: SiteAdapter, NexusPHPHelper {
 
             return value.doubleValue
         } catch {
+            logRuleAndSoup("bonus.extract.failed", nil, nil)
             return nil
         }
     }
@@ -324,6 +344,7 @@ final class NexusPHPWebAdapter: SiteAdapter, NexusPHPHelper {
             let rowsConfig = try JSONCast.optionalMap(passKeyConfig["rows"])
 
             if rowsConfig == nil {
+                logRuleAndSoup("passKey.rows.missing", passKeyConfig, soup)
                 throw SiteServiceException(message: "配置格式错误：缺少 rows 配置")
             }
 
@@ -334,6 +355,7 @@ final class NexusPHPWebAdapter: SiteAdapter, NexusPHPHelper {
             }
 
             guard let targetElement = extractor.findFirst(soup, rowSelector) else {
+                logRuleAndSoup("passKey.rows.notFound", rowsConfig, soup)
                 throw SiteServiceException(message: "未找到目标元素：\(rowSelector)")
             }
 
@@ -349,13 +371,17 @@ final class NexusPHPWebAdapter: SiteAdapter, NexusPHPHelper {
                     return value.string?.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
 
+                logRuleAndSoup("passKey.field.extractFailed", passKeyField.toJson(), targetElement)
+                logRuleAndSoup("passKey.rows.info", rowsConfig, soup)
                 throw SiteServiceException(
                     message: "提取PassKey失败：未匹配到目标元素\(rowSelector)"
                 )
             }
 
+            logRuleAndSoup("passKey.field.undefined", passKeyConfig, soup)
             throw SiteServiceException(message: "无法从配置中提取PassKey")
         } catch {
+            logRuleAndSoup("passKey.extract.failed", nil, nil)
             throw SiteServiceException(
                 message: "提取PassKey失败: \(NexusPHPWebErrorText.text(error))"
             )
@@ -484,28 +510,47 @@ final class NexusPHPWebAdapter: SiteAdapter, NexusPHPHelper {
     }
 
     func downloadTorrent(_ url: String) async throws -> Data {
-        var downloadUrl = url
-        if downloadUrl.hasPrefix("##") {
-            downloadUrl = String(downloadUrl.dropFirst(2))
-        }
+        do {
+            var downloadUrl = url
+            if downloadUrl.hasPrefix("##") {
+                downloadUrl = String(downloadUrl.dropFirst(2))
+            }
 
-        let response = try await client.perform(HTTPRequest(downloadUrl))
+            NexusPHPWebLog.write("NexusPHPWebAdapter: Downloading torrent from \(downloadUrl)")
 
-        let finalUri = response.url.absoluteString
-        if finalUri.contains("login") || finalUri.contains("verify") {
-            throw SiteServiceException(
-                message: "Download redirected to login/verify page. Check cookies."
+            let response = try await client.perform(HTTPRequest(downloadUrl))
+
+            NexusPHPWebLog.write(
+                "NexusPHPWebAdapter: Download finished. Status: \(response.statusCode)"
             )
+            NexusPHPWebLog.write(
+                "NexusPHPWebAdapter: Final URI: \(response.url.absoluteString)"
+            )
+
+            let finalUri = response.url.absoluteString
+            if finalUri.contains("login") || finalUri.contains("verify") {
+                throw SiteServiceException(
+                    message: "Download redirected to login/verify page. Check cookies."
+                )
+            }
+
+            let contentType = NexusPHPWebSafeContentTypeTransformer.transform(
+                response.headers["content-type"] ?? ""
+            )
+            if !contentType.isEmpty,
+               !contentType.contains("bittorrent"),
+               !contentType.contains("octet-stream")
+            {
+                NexusPHPWebLog.write(
+                    "NexusPHPWebAdapter: Warning - Content-Type is \(contentType), might not be a torrent file."
+                )
+            }
+
+            return response.data
+        } catch {
+            NexusPHPWebLog.write("下载种子文件失败: \(NexusPHPWebErrorText.text(error))")
+            throw error
         }
-
-        let contentType = NexusPHPWebSafeContentTypeTransformer.transform(
-            response.headers["content-type"] ?? ""
-        )
-        let looksLikeTorrent = contentType.contains("bittorrent")
-            || contentType.contains("octet-stream")
-        _ = looksLikeTorrent
-
-        return response.data
     }
 
     func parseTotalPages(_ soup: Node) async throws -> Int {
@@ -602,14 +647,18 @@ final class NexusPHPWebAdapter: SiteAdapter, NexusPHPHelper {
                         webviewUrl: resolvedDetailUrl
                     )
                 }
+
+                NexusPHPWebLog.write("NativeDetail: 未能提取到描述内容，回退到 WebView 模式")
             } catch {
+                NexusPHPWebLog.write(
+                    "NativeDetail: 提取失败，回退到 WebView: \(NexusPHPWebErrorText.text(error))"
+                )
             }
         }
 
-        throw SiteServiceException(
-            message: "原生详情提取失败，该站点详情页需要 WebView 渲染",
-            detail: resolvedDetailUrl
-        )
+        WebAdapterCore.syncCookiesToWebView(_siteConfig)
+
+        return TorrentDetail(descr: "", webviewUrl: resolvedDetailUrl)
     }
 
     private func findKdescrElement(_ soup: Element) -> Element? {
@@ -777,6 +826,7 @@ final class NexusPHPWebAdapter: SiteAdapter, NexusPHPHelper {
         let fieldsConfig = try JSONCast.optionalMap(categoriesConfig["fields"])
 
         if rowsConfig == nil || fieldsConfig == nil {
+            logRuleAndSoup("categories.config.missing", categoriesConfig, soup)
             throw SiteServiceException(message: "配置格式错误：缺少 rows 或 fields 配置")
         }
 
@@ -788,6 +838,7 @@ final class NexusPHPWebAdapter: SiteAdapter, NexusPHPHelper {
 
         let rowElements = extractor.findRows(soup, rowSelector)
         if rowElements.isEmpty {
+            logRuleAndSoup("categories.rows.notFound", rowsConfig, soup)
             throw SiteServiceException(message: "未找到目标元素：\(rowSelector)")
         }
 
